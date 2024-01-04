@@ -26,48 +26,52 @@ class JobListView(generics.ListCreateAPIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request, *args, **kwargs):
-        print(request.data)
-    # Extract data from the request
+        # Extract data from the request
         job_number = request.data.get('job_number', None)
         project_name = request.data.get('project_name', None)
         po_date = request.data.get('po_date', None)
         project_status = request.data.get('project_status', None)
-        client_id = request.data.get('client', None)  # Assuming 'client' is the client_id in the request data
-        file_titles = request.data.getlist('title', None)
-        files_data = request.FILES.getlist('files', None)
+        client_id = request.data.get('client', None)
 
-    # Validate that required fields are present
+        # Extract file data in the desired format
+        file_titles = [request.data.get(f'title{i}', None) for i in range(1, 100)]  # Assuming a maximum of 100 files
+        files_data = [request.FILES.get(f'file{i}', None) for i in range(1, 100)]
+
+        # Filter out None values, assuming not all 100 files are provided
+        file_titles = [title for title in file_titles if title is not None]
+        files_data = [file_data for file_data in files_data if file_data is not None]
+
+        # Validate that required fields are present
         if not all([job_number, project_name, po_date, project_status, client_id, file_titles, files_data]):
             return Response({'error': 'Incomplete data provided'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validate that the number of files matches the number of file titles
+        # Validate that the number of files matches the number of file titles
         if len(file_titles) != len(files_data):
             return Response({'error': 'Number of file titles does not match the number of files'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validate the date format
+        # Validate the date format
         try:
-        # Convert the date string to a datetime object in the expected format
+            # Convert the date string to a datetime object in the expected format
             po_date = datetime.strptime(po_date, '%y-%m-%d').date()
         except ValueError:
             return Response({'error': 'Invalid date format'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Get the Client instance based on the provided client_id
+        # Get the Client instance based on the provided client_id
         try:
             client = Client.objects.get(pk=client_id)
         except Client.DoesNotExist:
             return Response({'error': 'Client does not exist'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Create a new Job instance with the provided data
+        # Create a new Job instance with the provided data
         job = Job.objects.create(
             job_number=job_number,
             project_name=project_name,
             po_date=po_date,
             project_status=project_status,
             client=client
-       # files=files  # Assign the Client instance to the foreign key field
         )
 
-    # Handle files
+        # Handle files
         for title, file_data in zip(file_titles, files_data):
             File.objects.create(job=job, title=title, file=file_data)
 
@@ -129,14 +133,18 @@ class JobDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.project_status = request.data.get('project_status', instance.project_status)
         instance.client = Client.objects.get(pk=request.data.get('client', instance.client.pk))
 
+        # Delete previous files associated with the job
         for file in instance.files.all():
             file.file.delete()
-        # Delete previous files associated with the job
-        instance.files.all().delete()
+            file.delete()
 
         # Retrieve the new files from the request
-        new_files_data = request.FILES.getlist('files', [])
-        new_file_titles = request.data.getlist('title', [])
+        new_files_data = [request.FILES.get(f'file{i}', None) for i in range(1, 100)]
+        new_file_titles = [request.data.get(f'title{i}', None) for i in range(1, 100)]
+
+        # Filter out None values, assuming not all 100 files are provided
+        new_files_data = [file_data for file_data in new_files_data if file_data is not None]
+        new_file_titles = [title for title in new_file_titles if title is not None]
 
         # Create new files associated with the job
         for new_title, new_file_data in zip(new_file_titles, new_files_data):
